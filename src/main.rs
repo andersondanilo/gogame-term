@@ -46,7 +46,7 @@ fn main() -> Result<(), AppError> {
 
     info!("started engine: {}", engine.get_name()?);
 
-    renderer::render_board(&mut engine)?;
+    renderer::render_app(&mut engine)?;
 
     Ok(())
 }
