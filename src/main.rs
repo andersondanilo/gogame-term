@@ -1,5 +1,5 @@
 mod core;
-mod renderer;
+mod view;
 
 use crate::core::engine::Engine;
 use crate::core::errors::AppError;
@@ -46,7 +46,7 @@ fn main() -> Result<(), AppError> {
 
     info!("started engine: {}", engine.get_name()?);
 
-    renderer::render_app(&mut engine)?;
+    view::tui::render_app(&mut engine)?;
 
     Ok(())
 }
