@@ -8,6 +8,10 @@ pub fn get_column_name(col: u8) -> char {
     (64u8 + col + add) as char
 }
 
+pub fn get_column_number(col: char) -> u8 {
+    return col as u8 - 64u8;
+}
+
 pub fn parse_color(text: &str) -> Result<Color, AppError> {
     if text.starts_with("#") {
         let mut chars = text.chars();

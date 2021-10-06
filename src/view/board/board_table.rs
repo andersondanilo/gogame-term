@@ -10,9 +10,12 @@ pub struct BoardTable<'a> {
     rows: Vec<BoardRow<'a>>,
     board_size: u8,
     number_column_size: u8,
-    star_points: Vec<StarPoint>,
+    theme: Theme,
+    star_points: Vec<Coords>,
     white_stones: Vec<Stone>,
     black_stones: Vec<Stone>,
+    highlight_coords: OptCoords,
+    refresh_ui_request: bool,
 }
 
 struct BoardCell<'a> {
@@ -31,6 +34,13 @@ impl<'a> BoardCell<'a> {
             stone: None,
         }
     }
+
+    fn styled_spacing(style: Style) -> Self {
+        BoardCell {
+            cell: Cell::from("").style(style),
+            stone: None,
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -46,13 +56,18 @@ struct Stone {
     col: u8,
 }
 
-#[derive(Debug, Copy, Clone)]
-struct StarPoint {
-    row: u8,
-    col: u8,
+pub struct OptCoords {
+    pub row: Option<u8>,
+    pub col: Option<u8>,
 }
 
-impl StarPoint {
+#[derive(Debug, Copy, Clone)]
+pub struct Coords {
+    pub row: u8,
+    pub col: u8,
+}
+
+impl Coords {
     fn from(row: u8, col: u8) -> Self {
         Self { row, col }
     }
@@ -73,11 +88,6 @@ impl<'a> BoardTable<'a> {
         let board_size = engine.query_boardsize()?;
         let number_column_size = 3;
 
-        let default_style = Style::default()
-            .bg(theme.board_bg_color)
-            .fg(theme.text_fg_color);
-        let header_style = default_style.clone().add_modifier(theme.header_text_style);
-        let intersection_style = default_style.clone().fg(theme.intersection_color);
         let star_points = Self::make_star_points(board_size);
 
         let mut white_stones = vec![
@@ -105,26 +115,61 @@ impl<'a> BoardTable<'a> {
             },
         ];
 
-        let mut rows: Vec<BoardRow> = vec![Self::make_header_row(board_size, header_style)];
+        let mut table = BoardTable {
+            rows: vec![],
+            board_size,
+            number_column_size,
+            white_stones,
+            black_stones,
+            star_points,
+            theme: theme.clone(),
+            highlight_coords: OptCoords {
+                col: None,
+                row: None,
+            },
+            refresh_ui_request: false,
+        };
 
-        for line in (1..=board_size).rev() {
-            let line_stones = white_stones
+        table.refresh_ui_rows();
+
+        Ok(table)
+    }
+
+    pub fn change_highlight_coord(&mut self, highlight_coords: OptCoords) {
+        self.highlight_coords = highlight_coords;
+        self.refresh_ui_request = true;
+    }
+
+    fn refresh_ui_rows(&mut self) {
+        let default_style = Style::default()
+            .bg(self.theme.board_bg_color)
+            .fg(self.theme.text_fg_color);
+
+        let header_style = default_style
+            .clone()
+            .add_modifier(self.theme.header_text_style);
+        let intersection_style = default_style.clone().fg(self.theme.intersection_color);
+
+        let mut rows: Vec<BoardRow> = vec![self.make_header_row(header_style)];
+
+        for line in (1..=self.board_size).rev() {
+            let line_stones = self
+                .white_stones
                 .iter()
-                .chain(black_stones.iter())
+                .chain(self.black_stones.iter())
                 .filter(|stone| stone.row == line)
                 .copied()
                 .collect::<Vec<Stone>>();
 
-            let line_star_points = star_points
+            let line_star_points = self
+                .star_points
                 .iter()
                 .filter(|stone| stone.row == line)
                 .copied()
-                .collect::<Vec<StarPoint>>();
+                .collect::<Vec<Coords>>();
 
-            rows.push(Self::make_line_row(
-                board_size,
+            rows.push(self.make_line_row(
                 header_style,
-                theme,
                 intersection_style,
                 line,
                 line_stones,
@@ -132,43 +177,43 @@ impl<'a> BoardTable<'a> {
             ));
         }
 
-        rows.push(Self::make_header_row(board_size, header_style));
+        rows.push(self.make_header_row(header_style));
 
-        Ok(BoardTable {
-            rows,
-            board_size,
-            number_column_size,
-            white_stones,
-            black_stones,
-            star_points,
-        })
+        self.rows = rows
     }
 
-    fn make_star_points(board_size: u8) -> Vec<StarPoint> {
+    fn make_star_points(board_size: u8) -> Vec<Coords> {
         let margin = if board_size >= 13 { 4u8 } else { 3u8 };
         let middle = board_size / 2;
 
-        let mut points: Vec<StarPoint> = vec![
-            StarPoint::from(margin, margin),                  // top left
-            StarPoint::from(margin, board_size - margin + 1), // top right
-            StarPoint::from(board_size - margin + 1, margin), // bottom left
-            StarPoint::from(board_size - margin + 1, board_size - margin + 1), // bottom right
-            StarPoint::from(middle, middle),                  // middle point
+        let mut points: Vec<Coords> = vec![
+            Coords::from(margin, margin),                  // top left
+            Coords::from(margin, board_size - margin + 1), // top right
+            Coords::from(board_size - margin + 1, margin), // bottom left
+            Coords::from(board_size - margin + 1, board_size - margin + 1), // bottom right
+            Coords::from(middle, middle),                  // middle point
         ];
 
         if board_size >= 19 {
-            points.push(StarPoint::from(margin, middle)); // top horiz middle
-            points.push(StarPoint::from(board_size - margin + 1, middle)); // bottom horiz middle
-            points.push(StarPoint::from(middle, margin)); // left vertical middle
-            points.push(StarPoint::from(middle, board_size - margin + 1)); // right vertical middle
+            points.push(Coords::from(margin, middle)); // top horiz middle
+            points.push(Coords::from(board_size - margin + 1, middle)); // bottom horiz middle
+            points.push(Coords::from(middle, margin)); // left vertical middle
+            points.push(Coords::from(middle, board_size - margin + 1)); // right vertical middle
         }
 
         points
     }
 
-    fn make_header_row(board_size: u8, header_style: Style) -> BoardRow<'a> {
+    fn make_header_row(&self, default_header_style: Style) -> BoardRow<'a> {
         let mut header_cells: Vec<BoardCell> = vec![BoardCell::spacing()];
-        for column in 1..=board_size {
+
+        for column in 1..=self.board_size {
+            let header_style = if self.is_column_highlighted(column) {
+                default_header_style.bg(self.theme.board_bg_hl_color)
+            } else {
+                default_header_style
+            };
+
             header_cells.push(BoardCell::spacing());
             header_cells.push(BoardCell::from(
                 Cell::from(format!("{}", get_column_name(column))).style(header_style),
@@ -181,15 +226,31 @@ impl<'a> BoardTable<'a> {
         BoardRow::from(header_cells)
     }
 
+    fn is_column_highlighted(&self, column: u8) -> bool {
+        matches!(self.highlight_coords.col, Some(c) if c == column)
+    }
+
+    fn is_row_highlighted(&self, row: u8) -> bool {
+        matches!(self.highlight_coords.row, Some(r) if r == row)
+    }
+
     fn make_line_row(
-        board_size: u8,
+        &mut self,
         header_style: Style,
-        theme: &Theme,
         default_intersection_style: Style,
         line_nr: u8,
         mut line_stones: Vec<Stone>,
-        mut line_star_points: Vec<StarPoint>,
+        mut line_star_points: Vec<Coords>,
     ) -> BoardRow<'a> {
+        let (default_intersection_style, header_style) = if self.is_row_highlighted(line_nr) {
+            (
+                default_intersection_style.bg(self.theme.board_bg_hl_color),
+                header_style.bg(self.theme.board_bg_hl_color),
+            )
+        } else {
+            (default_intersection_style, header_style)
+        };
+
         let mut board_line: Vec<BoardCell> = vec![BoardCell::from(
             Cell::from(format!("{: >3}", line_nr)).style(header_style),
             None,
@@ -199,20 +260,20 @@ impl<'a> BoardTable<'a> {
         line_star_points.sort_by(|a, b| b.col.cmp(&a.col));
 
         let mut line_stones_next: Option<Stone> = line_stones.pop();
-        let mut line_star_next: Option<StarPoint> = line_star_points.pop();
+        let mut line_star_next: Option<Coords> = line_star_points.pop();
 
-        let white_stone_style = default_intersection_style.fg(theme.white_stone_color);
-        let black_stone_style = default_intersection_style.fg(theme.black_stone_color);
+        let white_stone_style = default_intersection_style.fg(self.theme.white_stone_color);
+        let black_stone_style = default_intersection_style.fg(self.theme.black_stone_color);
 
-        for column in 1..=board_size {
+        for column in 1..=self.board_size {
             if column > 1 {
                 board_line.push(BoardCell::from(
-                    Cell::from(theme.intersection_horiz_char.clone())
+                    Cell::from(self.theme.intersection_horiz_char.clone())
                         .style(default_intersection_style),
                     None,
                 ));
             } else {
-                board_line.push(BoardCell::spacing());
+                board_line.push(BoardCell::styled_spacing(default_intersection_style));
             }
 
             let stone: Option<Stone> = match line_stones_next {
@@ -241,29 +302,44 @@ impl<'a> BoardTable<'a> {
 
             let (intersection_char, intersection_style) = if is_star_point {
                 (
-                    theme.intersection_star_char.clone(),
-                    default_intersection_style.fg(theme.intersection_star_color),
+                    self.theme.intersection_star_char.clone(),
+                    default_intersection_style.fg(self.theme.intersection_star_color),
                 )
             } else {
-                (theme.intersection_char.clone(), default_intersection_style)
+                (
+                    self.theme.intersection_char.clone(),
+                    default_intersection_style,
+                )
             };
+
+            let mut selected_style = match stone {
+                Some(s) => match s.color {
+                    StoneColor::White => white_stone_style,
+                    StoneColor::Black => black_stone_style,
+                },
+                None => intersection_style,
+            };
+
+            if self.is_row_highlighted(line_nr) || self.is_column_highlighted(column) {
+                selected_style = selected_style.bg(self.theme.board_bg_hl_color);
+            }
 
             let intersection_cell = match stone {
                 Some(s) => match s.color {
                     StoneColor::White => {
-                        Cell::from(theme.white_stone_char.clone()).style(white_stone_style)
+                        Cell::from(self.theme.white_stone_char.clone()).style(selected_style)
                     }
                     StoneColor::Black => {
-                        Cell::from(theme.black_stone_char.clone()).style(black_stone_style)
+                        Cell::from(self.theme.black_stone_char.clone()).style(selected_style)
                     }
                 },
-                None => Cell::from(intersection_char).style(intersection_style),
+                None => Cell::from(intersection_char).style(selected_style),
             };
 
             board_line.push(BoardCell::from(intersection_cell, stone));
         }
 
-        board_line.push(BoardCell::spacing()); // spacing cell
+        board_line.push(BoardCell::styled_spacing(default_intersection_style)); // spacing cell
         board_line.push(BoardCell::from(
             Cell::from(format!("{: <3}", line_nr)).style(header_style),
             None,
@@ -273,6 +349,11 @@ impl<'a> BoardTable<'a> {
     }
 
     pub fn get_tui_rows(&mut self) -> Vec<Row> {
+        if self.refresh_ui_request {
+            self.refresh_ui_rows();
+            self.refresh_ui_request = false;
+        }
+
         return self
             .rows
             .iter()

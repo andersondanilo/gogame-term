@@ -4,6 +4,15 @@ use std::{io, thread};
 use termion::event::Key;
 use termion::input::TermRead;
 
+pub enum EventSideEffect {
+    QuitApp,
+    None,
+}
+
+pub trait EventHandler<I> {
+    fn on_event(&mut self, event: Event<I>) -> EventSideEffect;
+}
+
 pub enum Event<I> {
     Input(I),
     Tick,
