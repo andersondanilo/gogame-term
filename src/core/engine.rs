@@ -1,7 +1,6 @@
 use super::errors::AppError;
-use gtp::controller;
-use gtp::Command;
-use gtp::Response;
+use crate::core::entities::{Coords, Stone, StoneColor};
+use gtp::{controller, Command, Entity, EntityBuilder, Response};
 use log::{debug, warn};
 use std::time::Duration;
 
@@ -15,6 +14,10 @@ struct ResponseWrapper {
     response: gtp::Response,
 }
 
+enum ExpectedEntity {
+    Vertex,
+}
+
 impl ResponseWrapper {
     fn success_text(&self) -> Result<String, AppError> {
         match &self.response {
@@ -26,6 +29,35 @@ impl ResponseWrapper {
                 Err(AppError { message: err_msg })
             }
             Response::Result((_, text)) => Ok(text.clone()),
+        }
+    }
+
+    fn success_entities(&self, expected: ExpectedEntity) -> Result<Vec<Entity>, AppError> {
+        match &self.response {
+            Response::Error((_, text)) => {
+                let err_msg = format!("cmd '{}' returned '{}'", &self.cmd_name, &text);
+
+                warn!("{}", &err_msg);
+
+                Err(AppError { message: err_msg })
+            }
+            Response::Result((_, text)) => self
+                .response
+                .entities(|ep| {
+                    while !ep.is_eof() {
+                        match expected {
+                            ExpectedEntity::Vertex => ep.vertex(),
+                        };
+                    }
+                    ep
+                })
+                .map_err(|e| {
+                    let err_msg = format!("cmd '{}' returned '{}'", &self.cmd_name, &text);
+
+                    warn!("{}", &err_msg);
+
+                    AppError { message: err_msg }
+                }),
         }
     }
 }
@@ -50,19 +82,13 @@ impl Engine {
     }
 
     pub fn get_name(&mut self) -> Result<String, AppError> {
-        let resp = self.send_and_await("name")?;
-
-        resp.success_text()
-    }
-
-    pub fn showboard(&mut self) -> Result<String, AppError> {
-        let resp = self.send_and_await("showboard")?;
+        let resp = self.send_and_await("name", |e| e)?;
 
         resp.success_text()
     }
 
     pub fn query_boardsize(&mut self) -> Result<u8, AppError> {
-        let resp = self.send_and_await("query_boardsize")?;
+        let resp = self.send_and_await("query_boardsize", |e| e)?;
 
         let text: String = resp.success_text()?;
 
@@ -71,20 +97,72 @@ impl Engine {
         })
     }
 
-    fn send_and_await(&mut self, cmd_name: &str) -> Result<ResponseWrapper, AppError> {
-        let cmd = Command::cmd(cmd_name, |e| e);
+    pub fn play(&mut self, color: StoneColor, position: Coords) -> Result<(), AppError> {
+        let resp = self.send_and_await("play", |e| {
+            (match color {
+                StoneColor::White => e.w(),
+                StoneColor::Black => e.b(),
+            })
+            .v(position.vertex())
+            .list()
+        })?;
+
+        resp.success_text()?;
+
+        Ok(())
+    }
+
+    pub fn list_stones(&mut self, color: StoneColor) -> Result<Vec<Stone>, AppError> {
+        let resp = self.send_and_await("list_stones", |e| match color {
+            StoneColor::White => e.w(),
+            StoneColor::Black => e.b(),
+        })?;
+
+        let entities = resp.success_entities(ExpectedEntity::Vertex)?;
+        let mut stones: Vec<Stone> = vec![];
+
+        for entity in entities {
+            stones.push(self.parser_stone_with_color(color, &entity)?)
+        }
+
+        Ok(stones)
+    }
+
+    fn parser_stone_with_color(
+        &self,
+        color: StoneColor,
+        entity: &Entity,
+    ) -> Result<Stone, AppError> {
+        match entity {
+            Entity::Vertex((col, row)) => Ok(Stone {
+                color,
+                col: col.clone() as u8,
+                row: row.clone() as u8,
+            }),
+            _ => Err(AppError {
+                message: format!("Can't parse stone: {:?}", entity),
+            }),
+        }
+    }
+
+    fn send_and_await<T>(&mut self, cmd_name: &str, args: T) -> Result<ResponseWrapper, AppError>
+    where
+        T: Fn(&mut EntityBuilder) -> &mut EntityBuilder,
+    {
+        let cmd = Command::cmd(cmd_name, args);
+        let cmd_string = cmd.to_string();
 
         self.gtp_engine.send(cmd);
 
-        debug!("sending command: {}", cmd_name);
+        debug!("sending command: {}", &cmd_string);
 
         Ok(ResponseWrapper {
-            cmd_name: String::from(cmd_name),
+            cmd_name: cmd_string.clone(),
             response: self
                 .gtp_engine
                 .wait_response(self.cmd_timeout)
                 .map_err(|_| {
-                    let error_message = format!("Error calling comand '{}'", &cmd_name);
+                    let error_message = format!("Error calling comand '{}'", &cmd_string);
 
                     warn!("{}", &error_message);
 

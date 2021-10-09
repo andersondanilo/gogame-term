@@ -9,7 +9,9 @@ pub fn get_column_name(col: u8) -> char {
 }
 
 pub fn get_column_number(col: char) -> u8 {
-    return col as u8 - 64u8;
+    let col_nr = col as u8 - 64u8;
+    let remove = if col_nr >= 9 { 1 } else { 0 };
+    col_nr - remove
 }
 
 pub fn parse_color(text: &str) -> Result<Color, AppError> {
@@ -44,5 +46,45 @@ pub fn parse_color(text: &str) -> Result<Color, AppError> {
         _ => Err(AppError {
             message: format!("Can't parse named color {}", text),
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gtp::Entity;
+
+    #[test]
+    fn correct_column_name_number_mapping() {
+        let char_table = [
+            ('A', 1),
+            ('B', 2),
+            ('C', 3),
+            ('D', 4),
+            ('E', 5),
+            ('F', 6),
+            ('G', 7),
+            ('H', 8),
+            ('J', 9),
+            ('K', 10),
+            ('L', 11),
+            ('M', 12),
+            ('N', 13),
+            ('O', 14),
+            ('P', 15),
+            ('Q', 16),
+            ('R', 17),
+            ('S', 18),
+            ('T', 19),
+        ];
+
+        for (char_name, char_nr) in char_table {
+            assert_eq!(char_name, get_column_name(char_nr));
+            assert_eq!(char_nr, get_column_number(char_name));
+            assert_eq!(
+                format!("{}1", char_name),
+                Entity::Vertex((char_nr.into(), 1)).to_string()
+            );
+        }
     }
 }

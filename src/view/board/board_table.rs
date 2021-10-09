@@ -1,6 +1,5 @@
 use super::theme::Theme;
-use crate::core::engine::Engine;
-use crate::core::errors::AppError;
+use crate::core::entities::{Coords, OptCoords, Stone, StoneColor};
 use crate::core::helpers::get_column_name;
 use tui::layout::Constraint;
 use tui::style::Style;
@@ -43,36 +42,6 @@ impl<'a> BoardCell<'a> {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
-enum StoneColor {
-    White,
-    Black,
-}
-
-#[derive(Debug, Copy, Clone)]
-struct Stone {
-    color: StoneColor,
-    row: u8,
-    col: u8,
-}
-
-pub struct OptCoords {
-    pub row: Option<u8>,
-    pub col: Option<u8>,
-}
-
-#[derive(Debug, Copy, Clone)]
-pub struct Coords {
-    pub row: u8,
-    pub col: u8,
-}
-
-impl Coords {
-    fn from(row: u8, col: u8) -> Self {
-        Self { row, col }
-    }
-}
-
 struct BoardRow<'a> {
     cells: Vec<BoardCell<'a>>,
 }
@@ -84,43 +53,17 @@ impl<'a> BoardRow<'a> {
 }
 
 impl<'a> BoardTable<'a> {
-    pub fn from_engine(engine: &mut Engine, theme: &Theme) -> Result<Self, AppError> {
-        let board_size = engine.query_boardsize()?;
+    pub fn new(board_size: u8, theme: &Theme) -> Self {
         let number_column_size = 3;
 
         let star_points = Self::make_star_points(board_size);
-
-        let mut white_stones = vec![
-            Stone {
-                color: StoneColor::White,
-                row: 2,
-                col: 2,
-            },
-            Stone {
-                color: StoneColor::White,
-                row: 2,
-                col: 3,
-            },
-        ];
-        let mut black_stones = vec![
-            Stone {
-                color: StoneColor::Black,
-                row: 12,
-                col: 8,
-            },
-            Stone {
-                color: StoneColor::Black,
-                row: 13,
-                col: 8,
-            },
-        ];
 
         let mut table = BoardTable {
             rows: vec![],
             board_size,
             number_column_size,
-            white_stones,
-            black_stones,
+            white_stones: vec![],
+            black_stones: vec![],
             star_points,
             theme: theme.clone(),
             highlight_coords: OptCoords {
@@ -132,11 +75,25 @@ impl<'a> BoardTable<'a> {
 
         table.refresh_ui_rows();
 
-        Ok(table)
+        table
     }
 
-    pub fn change_highlight_coord(&mut self, highlight_coords: OptCoords) {
+    pub fn get_highlight_coords(&mut self) -> &OptCoords {
+        &self.highlight_coords
+    }
+
+    pub fn set_highlight_coords(&mut self, highlight_coords: OptCoords) {
         self.highlight_coords = highlight_coords;
+        self.refresh_ui_request = true;
+    }
+
+    pub fn set_white_stones(&mut self, white_stones: Vec<Stone>) {
+        self.white_stones = white_stones;
+        self.refresh_ui_request = true;
+    }
+
+    pub fn set_black_stones(&mut self, black_stones: Vec<Stone>) {
+        self.black_stones = black_stones;
         self.refresh_ui_request = true;
     }
 

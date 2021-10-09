@@ -29,7 +29,8 @@ pub fn render_app(engine: &mut Engine) -> Result<(), AppError> {
     let board_canvas_width_size = 4 + (((board_size as u16) * 2) - 1) + 4;
     let board_canvas_height_size = (board_size as u16) + 2;
 
-    let mut board_controller = BoardController::new(BoardTable::from_engine(engine, &theme)?);
+    let board_table = BoardTable::new(engine.query_boardsize()?, &theme);
+    let mut board_controller = BoardController::new(engine, board_table);
 
     // Setup event handlers
     let config = Config {
