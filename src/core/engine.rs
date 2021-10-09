@@ -2,6 +2,7 @@ use super::errors::AppError;
 use crate::core::entities::{Coords, Stone, StoneColor};
 use gtp::{controller, Command, Entity, EntityBuilder, Response};
 use log::{debug, warn};
+use std::thread;
 use std::time::{Duration, Instant};
 
 pub struct Engine {
@@ -170,6 +171,9 @@ impl Engine {
         debug!("sending command: {}", &cmd_string);
 
         self.gtp_engine.send(cmd);
+        // the pool interval is the timeout / 4, and we never have the result in the first pool, so
+        // it's better to delay the first pool (or change the gtp library, or even implment another)
+        thread::sleep(Duration::from_millis(5));
         let response = self.gtp_engine.wait_response(timeout);
 
         Ok(ResponseWrapper {
