@@ -2,11 +2,11 @@ use super::errors::AppError;
 use crate::core::entities::{Coords, Stone, StoneColor};
 use gtp::{controller, Command, Entity, EntityBuilder, Response};
 use log::{debug, warn};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 pub struct Engine {
     gtp_engine: gtp::controller::Engine,
-    cmd_timeout: Duration,
+    default_timeout: Duration,
 }
 
 struct ResponseWrapper {
@@ -68,7 +68,7 @@ impl Engine {
         args.append(&mut additional_args.clone());
 
         let str_args: Vec<&str> = args.iter().map(|s| s as &str).collect();
-        let cmd_timeout = Duration::from_millis(500);
+        let default_timeout = Duration::from_millis(100);
         let mut gtp_engine = controller::Engine::new(bin_path, &str_args);
 
         gtp_engine.start().map_err(|_| AppError {
@@ -77,18 +77,18 @@ impl Engine {
 
         Ok(Engine {
             gtp_engine,
-            cmd_timeout,
+            default_timeout,
         })
     }
 
     pub fn get_name(&mut self) -> Result<String, AppError> {
-        let resp = self.send_and_await("name", |e| e)?;
+        let resp = self.send_and_await("name", |e| e, self.default_timeout)?;
 
         resp.success_text()
     }
 
     pub fn query_boardsize(&mut self) -> Result<u8, AppError> {
-        let resp = self.send_and_await("query_boardsize", |e| e)?;
+        let resp = self.send_and_await("query_boardsize", |e| e, self.default_timeout)?;
 
         let text: String = resp.success_text()?;
 
@@ -98,14 +98,18 @@ impl Engine {
     }
 
     pub fn play(&mut self, color: StoneColor, position: Coords) -> Result<(), AppError> {
-        let resp = self.send_and_await("play", |e| {
-            (match color {
-                StoneColor::White => e.w(),
-                StoneColor::Black => e.b(),
-            })
-            .v(position.vertex())
-            .list()
-        })?;
+        let resp = self.send_and_await(
+            "play",
+            |e| {
+                (match color {
+                    StoneColor::White => e.w(),
+                    StoneColor::Black => e.b(),
+                })
+                .v(position.vertex())
+                .list()
+            },
+            self.default_timeout,
+        )?;
 
         resp.success_text()?;
 
@@ -113,10 +117,14 @@ impl Engine {
     }
 
     pub fn list_stones(&mut self, color: StoneColor) -> Result<Vec<Stone>, AppError> {
-        let resp = self.send_and_await("list_stones", |e| match color {
-            StoneColor::White => e.w(),
-            StoneColor::Black => e.b(),
-        })?;
+        let resp = self.send_and_await(
+            "list_stones",
+            |e| match color {
+                StoneColor::White => e.w(),
+                StoneColor::Black => e.b(),
+            },
+            self.default_timeout,
+        )?;
 
         let entities = resp.success_entities(ExpectedEntity::Vertex)?;
         let mut stones: Vec<Stone> = vec![];
@@ -145,24 +153,34 @@ impl Engine {
         }
     }
 
-    fn send_and_await<T>(&mut self, cmd_name: &str, args: T) -> Result<ResponseWrapper, AppError>
+    fn send_and_await<T>(
+        &mut self,
+        cmd_name: &str,
+        args: T,
+        timeout: Duration,
+    ) -> Result<ResponseWrapper, AppError>
     where
         T: Fn(&mut EntityBuilder) -> &mut EntityBuilder,
     {
+        let start_instant = Instant::now();
+
         let cmd = Command::cmd(cmd_name, args);
         let cmd_string = cmd.to_string();
 
-        self.gtp_engine.send(cmd);
-
         debug!("sending command: {}", &cmd_string);
+
+        self.gtp_engine.send(cmd);
+        let response = self.gtp_engine.wait_response(timeout);
 
         Ok(ResponseWrapper {
             cmd_name: cmd_string.clone(),
-            response: self
-                .gtp_engine
-                .wait_response(self.cmd_timeout)
+            response: response
                 .map_err(|_| {
-                    let error_message = format!("Error calling comand '{}'", &cmd_string);
+                    let error_message = format!(
+                        "Error calling comand '{}', after {}ms",
+                        &cmd_string,
+                        start_instant.elapsed().as_millis()
+                    );
 
                     warn!("{}", &error_message);
 
@@ -171,7 +189,12 @@ impl Engine {
                     }
                 })
                 .map(|resp| {
-                    debug!("received text: {}", resp.text());
+                    debug!(
+                        "cmd '{}' returned text: '{}', after {}ms",
+                        &cmd_string,
+                        resp.text(),
+                        start_instant.elapsed().as_millis()
+                    );
                     resp
                 })?,
         })
