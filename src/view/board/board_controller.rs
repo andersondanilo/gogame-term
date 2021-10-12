@@ -14,6 +14,7 @@ pub struct BoardController<'a> {
     char_range: [char; 19],
     number_range: [char; 10],
     player_color: StoneColor,
+    ai_color: StoneColor,
 }
 
 impl<'a> BoardController<'a> {
@@ -23,6 +24,7 @@ impl<'a> BoardController<'a> {
             engine,
             next_move_input: "".to_string(),
             player_color: StoneColor::Black,
+            ai_color: StoneColor::White,
             char_range: [
                 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q',
                 'R', 'S', 'T',
@@ -50,6 +52,8 @@ impl<'a> BoardController<'a> {
                     message: "invalid color".to_string(),
                 })?,
         )?;
+
+        let ai_move = self.engine.genmove(self.ai_color)?;
 
         Ok(())
     }

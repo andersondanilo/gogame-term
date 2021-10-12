@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 pub struct Engine {
     gtp_engine: gtp::controller::Engine,
     default_timeout: Duration,
+    genmove_timeout: Duration,
 }
 
 struct ResponseWrapper {
@@ -17,6 +18,12 @@ struct ResponseWrapper {
 
 enum ExpectedEntity {
     Vertex,
+}
+
+pub enum GenmoveResponse {
+    Position(Coords),
+    Resign,
+    Pass,
 }
 
 impl ResponseWrapper {
@@ -61,6 +68,28 @@ impl ResponseWrapper {
                 }),
         }
     }
+
+    fn success_entity(&self, expected: ExpectedEntity) -> Result<Entity, AppError> {
+        let mut entities = self.success_entities(expected)?;
+
+        entities.pop().ok_or(AppError {
+            message: "No entity found on response".to_string(),
+        })
+    }
+
+    fn success_coords(&self) -> Result<Coords, AppError> {
+        let entity = self.success_entity(ExpectedEntity::Vertex)?;
+
+        match entity {
+            Entity::Vertex((col, row)) => Ok(Coords {
+                col: col.clone() as u8,
+                row: row.clone() as u8,
+            }),
+            _ => Err(AppError {
+                message: "Failed to parse vertex entity".to_string(),
+            }),
+        }
+    }
 }
 
 impl Engine {
@@ -70,6 +99,7 @@ impl Engine {
 
         let str_args: Vec<&str> = args.iter().map(|s| s as &str).collect();
         let default_timeout = Duration::from_millis(100);
+        let genmove_timeout = Duration::from_millis(2000);
         let mut gtp_engine = controller::Engine::new(bin_path, &str_args);
 
         gtp_engine.start().map_err(|_| AppError {
@@ -79,6 +109,7 @@ impl Engine {
         Ok(Engine {
             gtp_engine,
             default_timeout,
+            genmove_timeout,
         })
     }
 
@@ -154,6 +185,23 @@ impl Engine {
         }
     }
 
+    pub fn genmove(&mut self, color: StoneColor) -> Result<GenmoveResponse, AppError> {
+        let resp = self.send_and_await(
+            "genmove",
+            |e| match color {
+                StoneColor::White => e.w(),
+                StoneColor::Black => e.b(),
+            },
+            self.genmove_timeout,
+        )?;
+
+        match resp.success_text()?.to_lowercase().as_str() {
+            "pass" => Ok(GenmoveResponse::Pass),
+            "resign" => Ok(GenmoveResponse::Resign),
+            _ => Ok(GenmoveResponse::Position(resp.success_coords()?)),
+        }
+    }
+
     fn send_and_await<T>(
         &mut self,
         cmd_name: &str,
@@ -181,7 +229,7 @@ impl Engine {
             response: response
                 .map_err(|_| {
                     let error_message = format!(
-                        "Error calling comand '{}', after {}ms",
+                        "Error calling command '{}', after {}ms",
                         &cmd_string,
                         start_instant.elapsed().as_millis()
                     );
