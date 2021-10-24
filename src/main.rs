@@ -1,11 +1,15 @@
 mod core;
 mod view;
 
-use crate::core::engine::Engine;
+use crate::core::engine::{EngineActor, QueryBoardSizeMessage};
 use crate::core::errors::AppError;
+use crate::view::board::{BoardControllerActor, BoardTableActor, Theme};
+use actix::prelude::*;
+use log::debug;
+use std::sync::mpsc::channel;
+use std::thread;
 
 use clap::{App, Arg};
-use log::info;
 
 fn main() -> Result<(), AppError> {
     let matches = App::new(env!("CARGO_PKG_NAME"))
@@ -42,11 +46,57 @@ fn main() -> Result<(), AppError> {
     )?;
 
     let app_config = core::config::get_app_config(matches.value_of("config"))?;
-    let mut engine = Engine::start(&app_config.engine.bin, &app_config.engine.args)?;
+    let theme = Theme::default();
 
-    info!("started engine: {}", engine.get_name()?);
+    let (controller_tx, controller_rx) = channel::<Addr<BoardControllerActor>>();
+    let (model_tx, model_rx) = channel::<Addr<BoardTableActor>>();
+    let theme_copy = theme.clone();
 
-    view::tui::render_app(&mut engine)?;
+    thread::spawn(move || {
+        let sys = System::new();
+
+        sys.block_on(async {
+            let engine_arbiter = Arbiter::new();
+            let bin = app_config.engine.bin.clone();
+            let args = app_config.engine.args.clone();
+            let engine_addr = EngineActor::start_in_arbiter(&engine_arbiter.handle(), move |_| {
+                EngineActor::new(&bin, &args).unwrap()
+            });
+
+            let board_size = engine_addr
+                .send(QueryBoardSizeMessage {})
+                .await
+                .unwrap()
+                .unwrap();
+
+            let board_arbiter = Arbiter::new();
+            let board_addr =
+                BoardTableActor::start_in_arbiter(&board_arbiter.handle(), move |_| {
+                    BoardTableActor::new(board_size, &theme_copy)
+                });
+
+            let board_controller_arbiter = Arbiter::new();
+            let board_controller_table_addr = board_addr.clone();
+            let board_controller_addr = BoardControllerActor::start_in_arbiter(
+                &board_controller_arbiter.handle(),
+                move |_| {
+                    BoardControllerActor::new(engine_addr, board_controller_table_addr.clone())
+                },
+            );
+
+            controller_tx.send(board_controller_addr).unwrap();
+            model_tx.send(board_addr).unwrap();
+        });
+
+        sys.run().unwrap();
+    });
+
+    debug!("waiting main actors");
+    let board_controller_addr = controller_rx.recv().unwrap();
+    let board_addr = model_rx.recv().unwrap();
+
+    debug!("starting render");
+    view::tui::render_app(&theme, board_controller_addr, board_addr)?;
 
     Ok(())
 }

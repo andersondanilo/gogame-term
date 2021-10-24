@@ -1,19 +1,28 @@
-use crate::core::engine::Engine;
 use crate::core::errors::AppError;
-use crate::view::board::{BoardController, BoardTable, Theme};
-use crate::view::events::{Config, Event, EventHandler, EventSideEffect, Events};
+use crate::view::board::{
+    BoardControllerActor, GetBoardSizeMessage, GetNextMoveInput, GetTuiRowsMessage,
+    GetTuiWidthsMessage, Theme,
+};
+use crate::view::events::{Config, EventSideEffect, Events, OnEventMessage};
+use crate::BoardTableActor;
+use actix::prelude::*;
+use log::debug;
 use std::time::Duration;
+use termion::event::Key;
 use termion::raw::IntoRawMode;
 use termion::screen::AlternateScreen;
+use tokio::runtime::Runtime;
 use tui::backend::TermionBackend;
 use tui::layout::{Constraint, Direction, Layout, Rect};
 use tui::style::Style;
 use tui::widgets::{Block, Paragraph, Table};
 use tui::Terminal;
 
-use termion::event::Key;
-
-pub fn render_app(engine: &mut Engine) -> Result<(), AppError> {
+pub fn render_app(
+    theme: &Theme,
+    board_controller_addr: Addr<BoardControllerActor>,
+    board_table_addr: Addr<BoardTableActor>,
+) -> Result<(), AppError> {
     let stdout = std::io::stdout().into_raw_mode().map_err(|_| AppError {
         message: "Can't get stdout".to_string(),
     })?;
@@ -23,14 +32,12 @@ pub fn render_app(engine: &mut Engine) -> Result<(), AppError> {
         message: "Can't get terminal".to_string(),
     })?;
 
-    let board_size = engine.query_boardsize()?;
-    let theme = Theme::default();
+    let tokio_rt = Runtime::new().unwrap();
+
+    let board_size: u8 = tokio_rt.block_on(board_table_addr.send(GetBoardSizeMessage {}))?;
 
     let board_canvas_width_size = 4 + (((board_size as u16) * 2) - 1) + 4;
     let board_canvas_height_size = (board_size as u16) + 2;
-
-    let board_table = BoardTable::new(engine.query_boardsize()?, &theme);
-    let mut board_controller = BoardController::new(engine, board_table);
 
     // Setup event handlers
     let config = Config {
@@ -62,11 +69,14 @@ pub fn render_app(engine: &mut Engine) -> Result<(), AppError> {
                         height: board_canvas_height_size,
                     });
 
-                let board_table = board_controller.borrow_board_table();
+                let tui_widths = tokio_rt
+                    .block_on(board_table_addr.send(GetTuiWidthsMessage {}))
+                    .unwrap();
+                let tui_rows = tokio_rt
+                    .block_on(board_table_addr.send(GetTuiRowsMessage {}))
+                    .unwrap();
 
-                let tui_widths = board_table.get_tui_widths();
-
-                let t = Table::new(board_table.get_tui_rows())
+                let t = Table::new(tui_rows)
                     .block(Block::default().style(board_default_style))
                     .column_spacing(0)
                     .widths(&tui_widths);
@@ -83,8 +93,11 @@ pub fn render_app(engine: &mut Engine) -> Result<(), AppError> {
                         height: chunks[1].height,
                     });
 
-                let next_move_message =
-                    Paragraph::new(format!("Next move: {}", board_controller.next_move_input));
+                let next_move_input = tokio_rt
+                    .block_on(board_table_addr.send(GetNextMoveInput {}))
+                    .unwrap();
+
+                let next_move_message = Paragraph::new(format!("Next move: {}", next_move_input));
                 f.render_widget(next_move_message, right_chunks[0]);
             })
             .map_err(|_| AppError {
@@ -95,12 +108,16 @@ pub fn render_app(engine: &mut Engine) -> Result<(), AppError> {
             message: "Can't get next event".to_string(),
         })?;
 
-        match board_controller.on_event(next_event) {
+        let event_response = tokio_rt
+            .block_on(board_controller_addr.send(OnEventMessage { event: next_event }))
+            .unwrap();
+
+        match event_response {
             EventSideEffect::QuitApp => {
                 break;
             }
             EventSideEffect::None => {}
-        };
+        }
     }
 
     Ok(())

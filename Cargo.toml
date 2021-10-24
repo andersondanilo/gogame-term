@@ -18,6 +18,9 @@ clap = "2.33.3"
 read_color = "1.0.0"
 tui = "0.16.0"
 termion = "1.5.6"
+actix = "0.12"
+tokio = { version = "1.12.0", features = ["rt", "rt-multi-thread"] }
+futures = "0.3"
 
 [profile.release]
 lto = true

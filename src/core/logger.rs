@@ -1,6 +1,8 @@
 use super::errors::AppError;
+use log::error;
 use simplelog::{CombinedLogger, Config, LevelFilter, SharedLogger, WriteLogger};
 use std::fs::File;
+use std::panic;
 
 pub fn get_logger_level_by_verbosity(verbosity: u64) -> LevelFilter {
     match verbosity {
@@ -35,6 +37,10 @@ pub fn init_logger(log_file_path: Option<&str>, log_level: LevelFilter) -> Resul
     CombinedLogger::init(loggers).map_err(|e| AppError {
         message: format!("Error initializing the logger, {}", &e.to_string()),
     })?;
+
+    // panic::set_hook(Box::new(|panic_info| {
+    //     error!("panic: {}", panic_info);
+    // }));
 
     Ok(())
 }

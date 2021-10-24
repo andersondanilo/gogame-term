@@ -1,16 +1,35 @@
+use actix::dev::MessageResponse;
+use actix::prelude::*;
 use std::sync::mpsc;
 use std::time::Duration;
 use std::{io, thread};
 use termion::event::Key;
 use termion::input::TermRead;
+use tokio::sync::oneshot::Sender as OneshotSender;
 
 pub enum EventSideEffect {
     QuitApp,
     None,
 }
 
-pub trait EventHandler<I> {
-    fn on_event(&mut self, event: Event<I>) -> EventSideEffect;
+pub struct OnEventMessage<I> {
+    pub event: Event<I>,
+}
+
+impl<I> Message for OnEventMessage<I> {
+    type Result = EventSideEffect;
+}
+
+impl<A, M> MessageResponse<A, M> for EventSideEffect
+where
+    A: Actor,
+    M: Message<Result = EventSideEffect>,
+{
+    fn handle(self, _: &mut A::Context, tx: Option<OneshotSender<EventSideEffect>>) {
+        if let Some(tx) = tx {
+            tx.send(self);
+        }
+    }
 }
 
 pub enum Event<I> {

@@ -1,64 +1,248 @@
 use super::theme::Theme;
 use crate::core::entities::{Coords, OptCoords, Stone, StoneColor};
 use crate::core::helpers::get_column_name;
+use actix::prelude::*;
+use std::sync::Arc;
 use tui::layout::Constraint;
 use tui::style::Style;
 use tui::widgets::{Cell, Row};
 
-pub struct BoardTable<'a> {
-    rows: Vec<BoardRow<'a>>,
+pub struct BoardTableActor {
+    rows: Vec<BoardRow>,
     board_size: u8,
     number_column_size: u8,
     theme: Theme,
     star_points: Vec<Coords>,
     white_stones: Vec<Stone>,
     black_stones: Vec<Stone>,
-    highlight_coords: OptCoords,
+    highlight_coords: Arc<OptCoords>,
     refresh_ui_request: bool,
+    next_move_input: String,
 }
 
-struct BoardCell<'a> {
-    cell: Cell<'a>,
+impl Actor for BoardTableActor {
+    type Context = Context<Self>;
+}
+
+struct BoardCell {
+    cell_text: String,
+    cell_style: Option<Style>,
     stone: Option<Stone>,
 }
 
-impl<'a> BoardCell<'a> {
-    fn from(cell: Cell<'a>, stone: Option<Stone>) -> Self {
-        BoardCell { cell, stone: None }
+impl BoardCell {
+    fn new(cell_text: String, cell_style: Option<Style>, stone: Option<Stone>) -> Self {
+        BoardCell {
+            cell_text,
+            cell_style,
+            stone,
+        }
+    }
+
+    fn from(cell_text: String, stone: Option<Stone>) -> Self {
+        BoardCell::new(cell_text, None, stone)
+    }
+
+    fn style(&mut self, style: Style) {
+        self.cell_style = Some(style);
     }
 
     fn spacing() -> Self {
-        BoardCell {
-            cell: Cell::from(""),
-            stone: None,
-        }
+        Self::from("".to_string(), None)
     }
 
     fn styled_spacing(style: Style) -> Self {
         BoardCell {
-            cell: Cell::from("").style(style),
+            cell_text: "".to_string(),
+            cell_style: Some(style),
             stone: None,
         }
     }
 }
 
-struct BoardRow<'a> {
-    cells: Vec<BoardCell<'a>>,
+struct BoardRow {
+    cells: Vec<BoardCell>,
 }
 
-impl<'a> BoardRow<'a> {
-    fn from(cells: Vec<BoardCell<'a>>) -> Self {
+impl BoardRow {
+    fn from(cells: Vec<BoardCell>) -> Self {
         BoardRow { cells }
     }
 }
 
-impl<'a> BoardTable<'a> {
+pub struct GetHighlightCoordsMessage {}
+
+impl Message for GetHighlightCoordsMessage {
+    type Result = Arc<OptCoords>;
+}
+
+impl Handler<GetHighlightCoordsMessage> for BoardTableActor {
+    type Result = Arc<OptCoords>;
+
+    fn handle(&mut self, _: GetHighlightCoordsMessage, _: &mut Context<Self>) -> Self::Result {
+        self.highlight_coords.clone()
+    }
+}
+
+pub struct GetNextMoveInput {}
+
+impl Message for GetNextMoveInput {
+    type Result = String;
+}
+
+impl Handler<GetNextMoveInput> for BoardTableActor {
+    type Result = String;
+
+    fn handle(&mut self, _: GetNextMoveInput, _: &mut Context<Self>) -> Self::Result {
+        self.next_move_input.clone()
+    }
+}
+
+pub struct SetNextMoveInput {
+    pub text: String,
+}
+
+impl Message for SetNextMoveInput {
+    type Result = ();
+}
+
+impl Handler<SetNextMoveInput> for BoardTableActor {
+    type Result = ();
+
+    fn handle(&mut self, msg: SetNextMoveInput, _: &mut Context<Self>) -> Self::Result {
+        self.next_move_input = msg.text
+    }
+}
+
+pub struct GetBoardSizeMessage {}
+
+impl Message for GetBoardSizeMessage {
+    type Result = u8;
+}
+
+impl Handler<GetBoardSizeMessage> for BoardTableActor {
+    type Result = u8;
+
+    fn handle(&mut self, _: GetBoardSizeMessage, _: &mut Context<Self>) -> Self::Result {
+        self.board_size
+    }
+}
+
+pub struct SetHightlightCoordsMessage {
+    pub coords: OptCoords,
+}
+
+impl Message for SetHightlightCoordsMessage {
+    type Result = ();
+}
+
+impl Handler<SetHightlightCoordsMessage> for BoardTableActor {
+    type Result = ();
+
+    fn handle(&mut self, msg: SetHightlightCoordsMessage, _: &mut Context<Self>) -> Self::Result {
+        self.highlight_coords = Arc::new(msg.coords);
+        self.refresh_ui_request = true;
+    }
+}
+
+pub struct SetWhiteStonesMessage {
+    pub stones: Vec<Stone>,
+}
+
+impl Message for SetWhiteStonesMessage {
+    type Result = ();
+}
+
+impl Handler<SetWhiteStonesMessage> for BoardTableActor {
+    type Result = ();
+
+    fn handle(&mut self, msg: SetWhiteStonesMessage, _: &mut Context<Self>) -> Self::Result {
+        self.white_stones = msg.stones;
+        self.refresh_ui_request = true;
+    }
+}
+
+pub struct SetBlackStonesMessage {
+    pub stones: Vec<Stone>,
+}
+
+impl Message for SetBlackStonesMessage {
+    type Result = ();
+}
+
+impl Handler<SetBlackStonesMessage> for BoardTableActor {
+    type Result = ();
+
+    fn handle(&mut self, msg: SetBlackStonesMessage, _: &mut Context<Self>) -> Self::Result {
+        self.black_stones = msg.stones;
+        self.refresh_ui_request = true;
+    }
+}
+
+pub struct GetTuiRowsMessage {}
+
+impl Message for GetTuiRowsMessage {
+    type Result = Vec<Row<'static>>;
+}
+
+impl Handler<GetTuiRowsMessage> for BoardTableActor {
+    type Result = Vec<Row<'static>>;
+
+    fn handle(&mut self, _: GetTuiRowsMessage, _: &mut Context<Self>) -> Self::Result {
+        if self.refresh_ui_request {
+            self.refresh_ui_rows();
+            self.refresh_ui_request = false;
+        }
+
+        return self
+            .rows
+            .iter()
+            .map(|board_row| {
+                Row::new(
+                    board_row
+                        .cells
+                        .iter()
+                        .map(|board_cell| {
+                            Cell::from(board_cell.cell_text.clone())
+                                .style(board_cell.cell_style.unwrap_or(Style::default()))
+                        })
+                        .collect::<Vec<Cell>>(),
+                )
+            })
+            .collect::<Vec<Row>>();
+    }
+}
+
+pub struct GetTuiWidthsMessage {}
+
+impl Message for GetTuiWidthsMessage {
+    type Result = Vec<Constraint>;
+}
+
+impl Handler<GetTuiWidthsMessage> for BoardTableActor {
+    type Result = Vec<Constraint>;
+
+    fn handle(&mut self, _: GetTuiWidthsMessage, _: &mut Context<Self>) -> Self::Result {
+        let mut widths: Vec<Constraint> = vec![Constraint::Length(self.number_column_size as u16)];
+
+        for _ in 1..=self.board_size {
+            widths.push(Constraint::Length(1)); // padding
+            widths.push(Constraint::Length(1)); // column
+        }
+        widths.push(Constraint::Length(1)); // spacing cell
+        widths.push(Constraint::Length(self.number_column_size as u16)); // number_column_size
+
+        widths
+    }
+}
+
+impl BoardTableActor {
     pub fn new(board_size: u8, theme: &Theme) -> Self {
         let number_column_size = 3;
 
         let star_points = Self::make_star_points(board_size);
 
-        let mut table = BoardTable {
+        let mut table = BoardTableActor {
             rows: vec![],
             board_size,
             number_column_size,
@@ -66,35 +250,17 @@ impl<'a> BoardTable<'a> {
             black_stones: vec![],
             star_points,
             theme: theme.clone(),
-            highlight_coords: OptCoords {
+            highlight_coords: Arc::new(OptCoords {
                 col: None,
                 row: None,
-            },
+            }),
             refresh_ui_request: false,
+            next_move_input: "".to_string(),
         };
 
         table.refresh_ui_rows();
 
         table
-    }
-
-    pub fn get_highlight_coords(&mut self) -> &OptCoords {
-        &self.highlight_coords
-    }
-
-    pub fn set_highlight_coords(&mut self, highlight_coords: OptCoords) {
-        self.highlight_coords = highlight_coords;
-        self.refresh_ui_request = true;
-    }
-
-    pub fn set_white_stones(&mut self, white_stones: Vec<Stone>) {
-        self.white_stones = white_stones;
-        self.refresh_ui_request = true;
-    }
-
-    pub fn set_black_stones(&mut self, black_stones: Vec<Stone>) {
-        self.black_stones = black_stones;
-        self.refresh_ui_request = true;
     }
 
     fn refresh_ui_rows(&mut self) {
@@ -161,7 +327,7 @@ impl<'a> BoardTable<'a> {
         points
     }
 
-    fn make_header_row(&self, default_header_style: Style) -> BoardRow<'a> {
+    fn make_header_row(&self, default_header_style: Style) -> BoardRow {
         let mut header_cells: Vec<BoardCell> = vec![BoardCell::spacing()];
 
         for column in 1..=self.board_size {
@@ -172,8 +338,9 @@ impl<'a> BoardTable<'a> {
             };
 
             header_cells.push(BoardCell::spacing());
-            header_cells.push(BoardCell::from(
-                Cell::from(format!("{}", get_column_name(column))).style(header_style),
+            header_cells.push(BoardCell::new(
+                format!("{}", get_column_name(column)),
+                Some(header_style),
                 None,
             ));
         }
@@ -198,7 +365,7 @@ impl<'a> BoardTable<'a> {
         line_nr: u8,
         mut line_stones: Vec<Stone>,
         mut line_star_points: Vec<Coords>,
-    ) -> BoardRow<'a> {
+    ) -> BoardRow {
         let (default_intersection_style, header_style) = if self.is_row_highlighted(line_nr) {
             (
                 default_intersection_style.bg(self.theme.board_bg_hl_color),
@@ -208,8 +375,9 @@ impl<'a> BoardTable<'a> {
             (default_intersection_style, header_style)
         };
 
-        let mut board_line: Vec<BoardCell> = vec![BoardCell::from(
-            Cell::from(format!("{: >3}", line_nr)).style(header_style),
+        let mut board_line: Vec<BoardCell> = vec![BoardCell::new(
+            format!("{: >3}", line_nr),
+            Some(header_style),
             None,
         )];
 
@@ -224,9 +392,9 @@ impl<'a> BoardTable<'a> {
 
         for column in 1..=self.board_size {
             if column > 1 {
-                board_line.push(BoardCell::from(
-                    Cell::from(self.theme.intersection_horiz_char.clone())
-                        .style(default_intersection_style),
+                board_line.push(BoardCell::new(
+                    self.theme.intersection_horiz_char.clone(),
+                    Some(default_intersection_style),
                     None,
                 ));
             } else {
@@ -281,61 +449,28 @@ impl<'a> BoardTable<'a> {
                 selected_style = selected_style.bg(self.theme.board_bg_hl_color);
             }
 
-            let intersection_cell = match stone {
+            let (cell_text, cell_style) = match stone {
                 Some(s) => match s.color {
                     StoneColor::White => {
-                        Cell::from(self.theme.white_stone_char.clone()).style(selected_style)
+                        (self.theme.white_stone_char.clone(), Some(selected_style))
                     }
                     StoneColor::Black => {
-                        Cell::from(self.theme.black_stone_char.clone()).style(selected_style)
+                        (self.theme.black_stone_char.clone(), Some(selected_style))
                     }
                 },
-                None => Cell::from(intersection_char).style(selected_style),
+                None => (intersection_char, Some(selected_style)),
             };
 
-            board_line.push(BoardCell::from(intersection_cell, stone));
+            board_line.push(BoardCell::new(cell_text, cell_style, stone));
         }
 
         board_line.push(BoardCell::styled_spacing(default_intersection_style)); // spacing cell
-        board_line.push(BoardCell::from(
-            Cell::from(format!("{: <3}", line_nr)).style(header_style),
+        board_line.push(BoardCell::new(
+            format!("{: <3}", line_nr),
+            Some(header_style),
             None,
         )); // number column
 
         BoardRow::from(board_line)
-    }
-
-    pub fn get_tui_rows(&mut self) -> Vec<Row> {
-        if self.refresh_ui_request {
-            self.refresh_ui_rows();
-            self.refresh_ui_request = false;
-        }
-
-        return self
-            .rows
-            .iter()
-            .map(|board_row| {
-                Row::new(
-                    board_row
-                        .cells
-                        .iter()
-                        .map(|board_cell| board_cell.cell.clone())
-                        .collect::<Vec<Cell>>(),
-                )
-            })
-            .collect::<Vec<Row>>();
-    }
-
-    pub fn get_tui_widths(&mut self) -> Vec<Constraint> {
-        let mut widths: Vec<Constraint> = vec![Constraint::Length(self.number_column_size as u16)];
-
-        for _ in 1..=self.board_size {
-            widths.push(Constraint::Length(1)); // padding
-            widths.push(Constraint::Length(1)); // column
-        }
-        widths.push(Constraint::Length(1)); // spacing cell
-        widths.push(Constraint::Length(self.number_column_size as u16)); // number_column_size
-
-        widths
     }
 }
