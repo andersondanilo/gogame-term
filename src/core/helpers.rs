@@ -1,6 +1,7 @@
 use super::errors::AppError;
+use crate::core::entities::OptCoords;
+use iced_native::Color;
 use read_color::rgb;
-use tui::style::Color;
 
 pub fn get_column_name(col: u8) -> char {
     // skip I column
@@ -20,33 +21,16 @@ pub fn parse_color(text: &str) -> Result<Color, AppError> {
         chars.next();
 
         return match rgb(&mut chars) {
-            Some([r, g, b]) => Ok(Color::Rgb(r, g, b)),
+            Some([r, g, b]) => Ok(Color::from_rgb8(r, g, b)),
             None => Err(AppError {
                 message: format!("Can't parse hex color {}", text),
             }),
         };
     }
 
-    match text {
-        "black" => Ok(Color::Black),
-        "red" => Ok(Color::Red),
-        "green" => Ok(Color::Green),
-        "yellow" => Ok(Color::Yellow),
-        "blue" => Ok(Color::Blue),
-        "magenta" => Ok(Color::Magenta),
-        "cyan" => Ok(Color::Cyan),
-        "gray" => Ok(Color::Gray),
-        "darkgray" => Ok(Color::DarkGray),
-        "lightred" => Ok(Color::LightRed),
-        "lightgreen" => Ok(Color::LightGreen),
-        "lightyellow" => Ok(Color::LightYellow),
-        "lightblue" => Ok(Color::LightBlue),
-        "lightmagenta" => Ok(Color::LightMagenta),
-        "lightcyan" => Ok(Color::LightCyan),
-        _ => Err(AppError {
-            message: format!("Can't parse named color {}", text),
-        }),
-    }
+    Err(AppError {
+        message: format!("Can't parse color {}", text),
+    })
 }
 
 #[cfg(test)]
@@ -87,4 +71,20 @@ mod tests {
             );
         }
     }
+}
+
+pub fn parse_input_coords(mut input: String) -> OptCoords {
+    let col: Option<u8> = if !input.is_empty() {
+        Some(get_column_number(input.remove(0)))
+    } else {
+        None
+    };
+
+    let row: Option<u8> = if !input.is_empty() {
+        input.parse().ok()
+    } else {
+        None
+    };
+
+    OptCoords { col, row }
 }

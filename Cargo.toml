@@ -16,11 +16,9 @@ log = "0.4.14"
 simplelog = "0.10.1"
 clap = "2.33.3"
 read_color = "1.0.0"
-tui = "0.16.0"
-termion = "1.5.6"
-actix = "0.12"
-tokio = { version = "1.12.0", features = ["rt", "rt-multi-thread"] }
-futures = "0.3"
+iced_native = "0.4"
+iced_tui = { version = "0.1.0", path = "../iced-tui" }
+iced_futures = {version="0.3", features=["tokio"]}
 
 [profile.release]
 lto = true

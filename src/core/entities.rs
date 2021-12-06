@@ -1,4 +1,3 @@
-use crate::AppError;
 use core::convert::{TryFrom, TryInto};
 
 #[derive(Debug, Copy, Clone)]
@@ -12,6 +11,13 @@ impl StoneColor {
         match self {
             Self::White => "white",
             Self::Black => "black",
+        }
+    }
+
+    pub fn inverse(&self) -> Self {
+        match self {
+            Self::White => Self::Black,
+            Self::Black => Self::White,
         }
     }
 }
@@ -29,6 +35,15 @@ pub struct OptCoords {
     pub col: Option<u8>,
 }
 
+impl Default for OptCoords {
+    fn default() -> Self {
+        Self {
+            row: None,
+            col: None,
+        }
+    }
+}
+
 #[derive(Debug, Copy, Clone)]
 pub struct Coords {
     pub row: u8,
@@ -44,20 +59,6 @@ impl Coords {
         (self.col as i32, self.row as i32)
     }
 }
-
-// impl TryInto<Coords> for OptCoords {
-//     type Error = ();
-//
-//     fn try_into(mut self) -> Result<Coords, ()> {
-//         match self {
-//             OptCoords {
-//                 col: Some(col),
-//                 row: Some(row),
-//             } => Ok(Coords::from(row, col)),
-//             _ => Err(()),
-//         }
-//     }
-// }
 
 impl TryFrom<&OptCoords> for Coords {
     type Error = ();

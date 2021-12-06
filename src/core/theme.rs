@@ -1,12 +1,13 @@
 use crate::core::helpers::parse_color;
-use tui::style::{Color, Modifier};
+use iced_native::Color;
+use iced_tui::Style;
 
 #[derive(Debug, Clone)]
 pub struct Theme {
     pub board_bg_color: Color,
     pub board_bg_hl_color: Color,
     pub text_fg_color: Color,
-    pub header_text_style: Modifier,
+    pub header_text_style: Style,
     pub intersection_char: String,
     pub intersection_star_char: String,
     pub intersection_star_color: Color,
@@ -24,7 +25,7 @@ impl Default for Theme {
             board_bg_color: parse_color("#af9769").unwrap(),
             board_bg_hl_color: parse_color("#E3C388").unwrap(),
             text_fg_color: parse_color("#1c1f25").unwrap(),
-            header_text_style: Modifier::BOLD,
+            header_text_style: Style::default().bold(),
             intersection_char: "┼".to_string(),
             intersection_star_char: "╋".to_string(),
             intersection_star_color: parse_color("#7d6c4b").unwrap(),

@@ -1,6 +1,5 @@
 use super::errors::AppError;
 use crate::core::entities::{Coords, Stone, StoneColor};
-use actix::prelude::*;
 use gtp::{controller, Command, Entity, EntityBuilder, Response};
 use log::{debug, warn};
 use std::thread;
@@ -8,18 +7,10 @@ use std::time::{Duration, Instant};
 
 pub struct OnStonesChangeMessage {}
 
-impl Message for OnStonesChangeMessage {
-    type Result = ();
-}
-
-pub struct EngineActor {
+pub struct Engine {
     gtp_engine: gtp::controller::Engine,
     default_timeout: Duration,
     genmove_timeout: Duration,
-}
-
-impl Actor for EngineActor {
-    type Context = Context<Self>;
 }
 
 struct ResponseWrapper {
@@ -35,131 +26,6 @@ pub enum GenMoveResponse {
     Position(Coords),
     Resign,
     Pass,
-}
-
-pub struct QueryBoardSizeMessage {}
-
-impl Message for QueryBoardSizeMessage {
-    type Result = Result<u8, AppError>;
-}
-
-impl Handler<QueryBoardSizeMessage> for EngineActor {
-    type Result = Result<u8, AppError>;
-
-    fn handle(&mut self, msg: QueryBoardSizeMessage, _: &mut Context<Self>) -> Self::Result {
-        let resp = self.send_and_await("query_boardsize", |e| e, self.default_timeout)?;
-
-        let text: String = resp.success_text()?;
-
-        text.parse().map_err(|_| AppError {
-            message: format!("invalid board size: {}", text),
-        })
-    }
-}
-
-pub struct PlayMessage {
-    pub color: StoneColor,
-    pub position: Coords,
-    pub listener: Recipient<OnStonesChangeMessage>,
-}
-
-impl Message for PlayMessage {
-    type Result = Result<(), AppError>;
-}
-
-impl Handler<PlayMessage> for EngineActor {
-    type Result = Result<(), AppError>;
-
-    fn handle(&mut self, msg: PlayMessage, _: &mut Context<Self>) -> Self::Result {
-        debug!("EngineActor [play-message]: started");
-        let resp = self.send_and_await(
-            "play",
-            |e| {
-                (match msg.color {
-                    StoneColor::White => e.w(),
-                    StoneColor::Black => e.b(),
-                })
-                .v(msg.position.vertex())
-                .list()
-            },
-            self.default_timeout,
-        )?;
-
-        resp.success_text()?;
-
-        debug!("EngineActor [play-message]: requesting on stones changed");
-
-        msg.listener.do_send(OnStonesChangeMessage {});
-
-        debug!("EngineActor [play-message]: finished");
-        Ok(())
-    }
-}
-
-pub struct ListStonesMessage {
-    pub color: StoneColor,
-}
-
-impl Message for ListStonesMessage {
-    type Result = Result<Vec<Stone>, AppError>;
-}
-
-impl Handler<ListStonesMessage> for EngineActor {
-    type Result = Result<Vec<Stone>, AppError>;
-
-    fn handle(&mut self, msg: ListStonesMessage, _: &mut Context<Self>) -> Self::Result {
-        let resp = self.send_and_await(
-            "list_stones",
-            |e| match msg.color {
-                StoneColor::White => e.w(),
-                StoneColor::Black => e.b(),
-            },
-            self.default_timeout,
-        )?;
-
-        let entities = resp.success_entities(ExpectedEntity::Vertex)?;
-        let mut stones: Vec<Stone> = vec![];
-
-        for entity in entities {
-            stones.push(self.parser_stone_with_color(msg.color, &entity)?)
-        }
-
-        Ok(stones)
-    }
-}
-
-pub struct GenMoveMessage {
-    pub color: StoneColor,
-    pub listener: Recipient<OnStonesChangeMessage>,
-}
-
-impl Message for GenMoveMessage {
-    type Result = Result<GenMoveResponse, AppError>;
-}
-
-impl Handler<GenMoveMessage> for EngineActor {
-    type Result = Result<GenMoveResponse, AppError>;
-
-    fn handle(&mut self, msg: GenMoveMessage, _: &mut Context<Self>) -> Self::Result {
-        let resp = self.send_and_await(
-            "genmove",
-            |e| match msg.color {
-                StoneColor::White => e.w(),
-                StoneColor::Black => e.b(),
-            },
-            self.genmove_timeout,
-        )?;
-
-        let response = match resp.success_text()?.to_lowercase().as_str() {
-            "pass" => Ok(GenMoveResponse::Pass),
-            "resign" => Ok(GenMoveResponse::Resign),
-            _ => Ok(GenMoveResponse::Position(resp.success_coords()?)),
-        };
-
-        msg.listener.do_send(OnStonesChangeMessage {});
-
-        return response;
-    }
 }
 
 impl ResponseWrapper {
@@ -228,7 +94,7 @@ impl ResponseWrapper {
     }
 }
 
-impl EngineActor {
+impl Engine {
     pub fn new(bin_path: &str, additional_args: &Vec<String>) -> Result<Self, AppError> {
         let mut args: Vec<String> = vec!["--mode".to_string(), "gtp".to_string()];
         args.append(&mut additional_args.clone());
@@ -241,7 +107,7 @@ impl EngineActor {
         gtp_engine.start().map_err(|_| AppError {
             message: format!("Error starting engine '{}'", &bin_path),
         })?;
-        Ok(EngineActor {
+        Ok(Self {
             gtp_engine,
             default_timeout,
             genmove_timeout,
@@ -265,7 +131,77 @@ impl EngineActor {
         }
     }
 
-    fn send_and_await<T>(
+    pub fn query_board_size(&mut self) -> Result<u8, AppError> {
+        let resp = self.send_and_await("query_boardsize", |e| e, self.default_timeout)?;
+
+        let text: String = resp.success_text()?;
+
+        text.parse().map_err(|_| AppError {
+            message: format!("invalid board size: {}", text),
+        })
+    }
+
+    pub fn play(&mut self, color: StoneColor, position: Coords) -> Result<(), AppError> {
+        debug!("EngineActor [play-message]: started");
+        let resp = self.send_and_await(
+            "play",
+            |e| {
+                (match color {
+                    StoneColor::White => e.w(),
+                    StoneColor::Black => e.b(),
+                })
+                .v(position.vertex())
+                .list()
+            },
+            self.default_timeout,
+        )?;
+
+        resp.success_text()?;
+
+        debug!("EngineActor [play-message]: finished");
+        Ok(())
+    }
+
+    pub fn list_stones(&mut self, color: StoneColor) -> Result<Vec<Stone>, AppError> {
+        let resp = self.send_and_await(
+            "list_stones",
+            |e| match color {
+                StoneColor::White => e.w(),
+                StoneColor::Black => e.b(),
+            },
+            self.default_timeout,
+        )?;
+
+        let entities = resp.success_entities(ExpectedEntity::Vertex)?;
+        let mut stones: Vec<Stone> = vec![];
+
+        for entity in entities {
+            stones.push(self.parser_stone_with_color(color, &entity)?)
+        }
+
+        Ok(stones)
+    }
+
+    pub fn gen_move(&mut self, color: StoneColor) -> Result<GenMoveResponse, AppError> {
+        let resp = self.send_and_await(
+            "genmove",
+            |e| match color {
+                StoneColor::White => e.w(),
+                StoneColor::Black => e.b(),
+            },
+            self.genmove_timeout,
+        )?;
+
+        let response = match resp.success_text()?.to_lowercase().as_str() {
+            "pass" => Ok(GenMoveResponse::Pass),
+            "resign" => Ok(GenMoveResponse::Resign),
+            _ => Ok(GenMoveResponse::Position(resp.success_coords()?)),
+        };
+
+        return response;
+    }
+
+    pub fn send_and_await<T>(
         &mut self,
         cmd_name: &str,
         args: T,
