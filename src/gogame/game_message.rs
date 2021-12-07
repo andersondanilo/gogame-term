@@ -8,4 +8,5 @@ pub enum GameMessage {
     EventOccurred(Event),
     AfterStonePlayed(Vec<Stone>, Vec<Stone>),
     AfterGenMove(Vec<Stone>, Vec<Stone>),
+    GtpError(String),
 }

@@ -5,8 +5,6 @@ use log::{debug, warn};
 use std::thread;
 use std::time::{Duration, Instant};
 
-pub struct OnStonesChangeMessage {}
-
 pub struct Engine {
     gtp_engine: gtp::controller::Engine,
     default_timeout: Duration,
@@ -61,7 +59,7 @@ impl ResponseWrapper {
                     }
                     ep
                 })
-                .map_err(|e| {
+                .map_err(|_| {
                     let err_msg = format!("cmd '{}' returned '{}'", &self.cmd_name, &text);
 
                     warn!("{}", &err_msg);
@@ -201,7 +199,7 @@ impl Engine {
         return response;
     }
 
-    pub fn send_and_await<T>(
+    fn send_and_await<T>(
         &mut self,
         cmd_name: &str,
         args: T,

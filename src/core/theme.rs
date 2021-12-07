@@ -17,6 +17,10 @@ pub struct Theme {
     pub black_stone_color: Color,
     pub intersection_horiz_char: String,
     pub intersection_color: Color,
+    pub error_message_fg: Color,
+    pub error_message_bg: Color,
+    pub loading_label_fg: Color,
+    pub loading_label_bg: Color,
 }
 
 impl Default for Theme {
@@ -35,6 +39,10 @@ impl Default for Theme {
             black_stone_char: "●".to_string(),
             white_stone_color: parse_color("#FFFFFF").unwrap(),
             black_stone_color: parse_color("#000000").unwrap(),
+            error_message_fg: parse_color("#FFFFFF").unwrap(),
+            error_message_bg: parse_color("#FF0000").unwrap(),
+            loading_label_fg: parse_color("#FFFFFF").unwrap(),
+            loading_label_bg: parse_color("#00FF00").unwrap(),
         }
     }
 }

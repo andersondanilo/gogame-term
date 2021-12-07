@@ -1,6 +1,7 @@
 use crate::core::engine::Engine;
 use crate::core::entities::{Coords, Stone, StoneColor};
-use crate::core::helpers::parse_input_coords;
+use crate::core::errors::AppError;
+use crate::core::helpers::{parse_input_coords, TryPush};
 use crate::core::theme::Theme;
 use crate::core::{config, logger};
 use crate::gogame::board::Board;
@@ -8,9 +9,10 @@ use crate::gogame::game_message::GameMessage;
 use clap::{App, Arg};
 use iced_futures::executor::Tokio;
 use iced_native::{
-    keyboard, subscription, Command, Container, Element, Event, Length, Row, Subscription, Text,
+    keyboard, subscription, Column, Command, Container, Element, Event, Length, Row, Subscription,
+    Text,
 };
-use iced_tui::{Application, TuiRenderer};
+use iced_tui::{Application, Style, TuiRenderer};
 use std::sync::{Arc, Mutex};
 
 const INPUT_CHAR_RANGE: [char; 19] = [
@@ -22,6 +24,7 @@ const INPUT_NUMBER_RANGE: [char; 10] = ['0', '1', '2', '3', '4', '5', '6', '7', 
 enum GtpStatus {
     Loading,
     Idle,
+    Error,
 }
 
 pub struct GoGame {
@@ -31,6 +34,8 @@ pub struct GoGame {
     player_color: StoneColor,
     gtp_engine: Arc<Mutex<Engine>>,
     gtp_status: GtpStatus,
+    gtp_error: Option<String>,
+    theme: Theme,
 }
 
 impl Application for GoGame {
@@ -77,6 +82,8 @@ impl Application for GoGame {
             Engine::new(&app_config.engine.bin, &app_config.engine.args).unwrap(),
         ));
 
+        let theme = Theme::default();
+
         let state = GoGame {
             should_exit: None,
             board: None,
@@ -84,11 +91,13 @@ impl Application for GoGame {
             gtp_engine: gtp_engine.clone(),
             gtp_status: GtpStatus::Idle,
             player_color: StoneColor::Black,
+            gtp_error: None,
+            theme: theme.clone(),
         };
 
         (
             state,
-            Command::perform(GoGame::load_board(gtp_engine), |board| {
+            Command::perform(GoGame::load_board(gtp_engine, theme), |board| {
                 GameMessage::BoardLoaded(board)
             }),
         )
@@ -102,7 +111,7 @@ impl Application for GoGame {
         subscription::events().map(Self::Message::EventOccurred)
     }
 
-    fn view(&mut self) -> Element<Self::Message, TuiRenderer> {
+    fn view(&self) -> Element<Self::Message, TuiRenderer> {
         Container::new(
             Row::new()
                 .spacing(2)
@@ -111,13 +120,30 @@ impl Application for GoGame {
                     Some(board) => board.view(),
                     None => Text::new("Empty board").into(),
                 })
-                .push(Row::new().push(Text::new("Next move: ")).push(
-                    if self.gtp_status == GtpStatus::Loading {
-                        Text::new("Loading").width(Length::Units(7))
-                    } else {
-                        Text::new(self.next_move_input.clone()).width(Length::Units(7))
-                    },
-                )),
+                .push(
+                    Column::new()
+                        .spacing(1)
+                        .push(Row::new().push(Text::new("Next move: ")).push(
+                            if self.gtp_status == GtpStatus::Loading {
+                                Text::new("Loading").width(Length::Units(7)).font(
+                                    Style::default()
+                                        .bg(self.theme.loading_label_bg)
+                                        .fg(self.theme.loading_label_fg),
+                                )
+                            } else {
+                                Text::new(self.next_move_input.clone()).width(Length::Units(7))
+                            },
+                        ))
+                        .try_push(self.gtp_error.clone().map(|message| {
+                            Container::new(Text::new(message))
+                                .style(
+                                    Style::default()
+                                        .bg(self.theme.error_message_bg)
+                                        .fg(self.theme.error_message_fg),
+                                )
+                                .width(Length::Units(18))
+                        })),
+                ),
         )
         .width(Length::Fill)
         .height(Length::Fill)
@@ -161,8 +187,11 @@ impl Application for GoGame {
                                     coords,
                                     self.player_color,
                                 ),
-                                |(black_stones, white_stones)| {
-                                    GameMessage::AfterStonePlayed(black_stones, white_stones)
+                                |result| match result {
+                                    Ok((black_stones, white_stones)) => {
+                                        GameMessage::AfterStonePlayed(black_stones, white_stones)
+                                    }
+                                    Err(app_error) => GameMessage::GtpError(app_error.message),
                                 },
                             );
                         }
@@ -195,8 +224,11 @@ impl Application for GoGame {
 
                 Command::perform(
                     GoGame::gen_next_move(self.gtp_engine.clone(), self.player_color),
-                    |(black_stones, white_stones)| {
-                        GameMessage::AfterGenMove(black_stones, white_stones)
+                    |result| match result {
+                        Ok((black_stones, white_stones)) => {
+                            GameMessage::AfterGenMove(black_stones, white_stones)
+                        }
+                        Err(app_error) => GameMessage::GtpError(app_error.message),
                     },
                 )
             }
@@ -207,14 +239,18 @@ impl Application for GoGame {
                 self.gtp_status = GtpStatus::Idle;
                 Command::none()
             }
-            _ => Command::none(),
+            GameMessage::GtpError(message) => {
+                self.gtp_error = Some(message);
+                self.gtp_status = GtpStatus::Error;
+                Command::none()
+            }
+            GameMessage::EventOccurred(_) => Command::none(),
         }
     }
 }
 
 impl GoGame {
-    async fn load_board(gtp_engine: Arc<Mutex<Engine>>) -> Board {
-        let theme = Theme::default();
+    async fn load_board(gtp_engine: Arc<Mutex<Engine>>, theme: Theme) -> Board {
         let board_size = gtp_engine.lock().unwrap().query_board_size().unwrap();
         Board::new(board_size, theme)
     }
@@ -223,27 +259,27 @@ impl GoGame {
         gtp_engine: Arc<Mutex<Engine>>,
         coords: Coords,
         color: StoneColor,
-    ) -> (Vec<Stone>, Vec<Stone>) {
+    ) -> Result<(Vec<Stone>, Vec<Stone>), AppError> {
         let mut gtp_engine = gtp_engine.lock().unwrap();
-        gtp_engine.play(color, coords).unwrap();
+        gtp_engine.play(color, coords)?;
 
-        let black_stones = gtp_engine.list_stones(StoneColor::Black).unwrap();
-        let white_stones = gtp_engine.list_stones(StoneColor::White).unwrap();
+        let black_stones = gtp_engine.list_stones(StoneColor::Black)?;
+        let white_stones = gtp_engine.list_stones(StoneColor::White)?;
 
-        (black_stones, white_stones)
+        Ok((black_stones, white_stones))
     }
 
     async fn gen_next_move(
         gtp_engine: Arc<Mutex<Engine>>,
         player_color: StoneColor,
-    ) -> (Vec<Stone>, Vec<Stone>) {
+    ) -> Result<(Vec<Stone>, Vec<Stone>), AppError> {
         let mut gtp_engine = gtp_engine.lock().unwrap();
-        gtp_engine.gen_move(player_color.inverse()).unwrap();
+        gtp_engine.gen_move(player_color.inverse())?;
 
-        let black_stones = gtp_engine.list_stones(StoneColor::Black).unwrap();
-        let white_stones = gtp_engine.list_stones(StoneColor::White).unwrap();
+        let black_stones = gtp_engine.list_stones(StoneColor::Black)?;
+        let white_stones = gtp_engine.list_stones(StoneColor::White)?;
 
-        (black_stones, white_stones)
+        Ok((black_stones, white_stones))
     }
 
     fn refresh_highlight_coords(&mut self) {

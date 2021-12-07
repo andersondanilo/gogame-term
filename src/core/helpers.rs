@@ -1,6 +1,6 @@
 use super::errors::AppError;
 use crate::core::entities::OptCoords;
-use iced_native::Color;
+use iced_native::{Color, Column, Element, Row};
 use read_color::rgb;
 
 pub fn get_column_name(col: u8) -> char {
@@ -87,4 +87,35 @@ pub fn parse_input_coords(mut input: String) -> OptCoords {
     };
 
     OptCoords { col, row }
+}
+
+pub trait TryPush<'a, Message, Renderer> {
+    /// Adds an [`Element`] to the [`Row`].
+    fn try_push<E>(self, child: Option<E>) -> Self
+    where
+        E: Into<Element<'a, Message, Renderer>>;
+}
+
+impl<'a, Message, Renderer> TryPush<'a, Message, Renderer> for Row<'a, Message, Renderer> {
+    fn try_push<E>(self, child: Option<E>) -> Self
+    where
+        E: Into<Element<'a, Message, Renderer>>,
+    {
+        match child {
+            Some(child) => self.push(child),
+            None => self,
+        }
+    }
+}
+
+impl<'a, Message, Renderer> TryPush<'a, Message, Renderer> for Column<'a, Message, Renderer> {
+    fn try_push<E>(self, child: Option<E>) -> Self
+    where
+        E: Into<Element<'a, Message, Renderer>>,
+    {
+        match child {
+            Some(child) => self.push(child),
+            None => self,
+        }
+    }
 }

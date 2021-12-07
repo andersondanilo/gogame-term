@@ -163,7 +163,7 @@ impl Board {
             }
 
             board_line =
-                board_line.push(Text::new(format!(" {: <2}", line_number + 1)).font(header_style));
+                board_line.push(Text::new(format!(" {: <2}", line_number)).font(header_style));
 
             column = column.push(board_line);
         }
